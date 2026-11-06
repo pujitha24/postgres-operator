@@ -1527,6 +1527,13 @@ DBUSERS:
 		return fmt.Errorf("error executing sync statements: %v", err)
 	}
 
+	// deprecation of removed team members succeeded, no need to retry
+	for name := range c.pgUsersCache {
+		if _, exists := c.pgUsers[name]; !exists {
+			delete(c.pgUsersCache, name)
+		}
+	}
+
 	return nil
 }
 

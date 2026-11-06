@@ -517,6 +517,41 @@ func (m *mockTeamsAPIClientMultipleTeams) TeamInfo(teamID, token string) (tm *te
 		fmt.Errorf("mocked %d error of mock Teams API for team %q", http.StatusNotFound, teamID)
 }
 
+// Removed team members must stay in pgUsersCache until deprecation succeeded
+func TestInitUsersKeepsRemovedTeamMembersInCache(t *testing.T) {
+	var mockTeamsAPI mockTeamsAPIClient
+	cl.oauthTokenGetter = &mockOAuthTokenGetter{}
+	cl.teamsAPIClient = &mockTeamsAPI
+	cl.OpConfig.EnableTeamSuperuser = false
+	cl.OpConfig.EnableTeamsAPI = true
+	cl.OpConfig.EnableTeamMemberDeprecation = true
+	cl.OpConfig.PamRoleName = "zalandos"
+	cl.Spec.TeamID = "test"
+	cl.pgUsersCache = map[string]spec.PgUser{}
+	cl.pgUsers = map[string]spec.PgUser{}
+
+	mockTeamsAPI.setMembers([]string{"foo"})
+	if err := cl.initUsers(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// foo is removed from the team; it is cached after this sync
+	mockTeamsAPI.setMembers([]string{"bar"})
+	if err := cl.initUsers(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// a further sync without a successful syncRoles must not forget foo
+	if err := cl.initUsers(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := cl.pgUsersCache["foo"]; !ok {
+		t.Errorf("removed team member foo was dropped from pgUsersCache before deprecation succeeded")
+	}
+	if _, ok := cl.pgUsers["foo"]; ok {
+		t.Errorf("removed team member foo must not be in pgUsers")
+	}
+}
+
 // Test adding members of maintenance teams that get superuser rights for all PG databases
 func TestInitHumanUsersWithSuperuserTeams(t *testing.T) {
 	var mockTeamsAPI mockTeamsAPIClientMultipleTeams
